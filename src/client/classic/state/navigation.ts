@@ -13,7 +13,9 @@ export const page = localStorageSignal<PageName>({
         typeof window !== 'undefined'
           ? window.sessionStorage.getItem(storageKeySolved(challengeNumber))
           : null;
-      if (solved && Number.isFinite(Number(solved))) return 'win';
+      if (solved && Number.isFinite(Number(solved))) {
+        return 'win';
+      }
     } catch {
       // ignore
     }

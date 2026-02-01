@@ -1,10 +1,11 @@
-import { expect } from 'vitest';
-import { it, resetRedis } from './devvitTest';
+import { expect, vi } from 'vitest';
 import { Challenge } from '../core/challenge';
 import { buildHintCsvForChallenge, buildLetterCsvForChallenge } from '../core/api';
+import * as API from '../core/api';
+import { redis } from '@devvit/web/server';
+import { test } from '../test';
 
-it('buildLetterCsvForChallenge filters by letter and computes 1-based ranks', async () => {
-  await resetRedis();
+test('buildLetterCsvForChallenge filters by letter and computes 1-based ranks', async () => {
   // Seed a challenge with a secret word
   await Challenge.setChallenge({
     challengeNumber: 1,
@@ -18,6 +19,20 @@ it('buildLetterCsvForChallenge filters by letter and computes 1-based ranks', as
       totalGiveUps: '0',
     },
   });
+
+  // Prime cache for getWordConfigCached so no network calls occur
+  const appleConfig = {
+    closest_word: 'apply',
+    closest_similarity: 0.95,
+    furthest_word: 'zebra',
+    furthest_similarity: 0.01,
+    similar_words: [
+      { word: 'apex', similarity: 0.75, is_hint: true },
+      { word: 'apricot', similarity: 0.65, is_hint: false },
+      { word: 'ample', similarity: 0.6, is_hint: true },
+    ],
+  };
+  await redis.set(`word_config2:apple`, JSON.stringify(appleConfig));
 
   // Mock getWordConfigCached by priming its Redis cache key with a known payload
   // Importing the key function indirectly is cumbersome; instead, call once via builder
@@ -36,8 +51,7 @@ it('buildLetterCsvForChallenge filters by letter and computes 1-based ranks', as
   expect(linesEmpty.length).toBe(1);
 });
 
-it('buildHintCsvForChallenge returns header + up to 500 rows, ranked 1..N', async () => {
-  await resetRedis();
+test('buildHintCsvForChallenge returns header + up to 500 rows, ranked 1..N', async () => {
   await Challenge.setChallenge({
     challengeNumber: 2,
     config: {
@@ -50,6 +64,21 @@ it('buildHintCsvForChallenge returns header + up to 500 rows, ranked 1..N', asyn
       totalGiveUps: '0',
     },
   });
+
+  // Prime cache for banana
+  const bananaConfig = {
+    closest_word: 'bananas',
+    closest_similarity: 0.93,
+    furthest_word: 'xylophone',
+    furthest_similarity: 0.02,
+    similar_words: [
+      { word: 'plantain', similarity: 0.82, is_hint: true },
+      { word: 'yellow', similarity: 0.5, is_hint: false },
+      { word: 'fruit', similarity: 0.48, is_hint: true },
+      { word: 'smoothie', similarity: 0.3, is_hint: true },
+    ],
+  };
+  await redis.set(`word_config2:banana`, JSON.stringify(bananaConfig));
 
   const csv = await buildHintCsvForChallenge({ challengeSecretWord: 'banana', max: 10 });
   const lines = csv.split(/\r?\n/).filter(Boolean);

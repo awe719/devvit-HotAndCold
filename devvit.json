@@ -10,59 +10,257 @@
       }
     }
   },
+  "marketingAssets": {
+    "icon": "assets/icon.png"
+  },
+  "media": {
+    "dir": "assets"
+  },
   "server": {
     "dir": "dist/server",
     "entry": "index.cjs"
   },
   "forms": {
     "queueAddForm": "/internal/form/queue/add",
-    "queueClearForm": "/internal/form/queue/clear"
+    "queueClearForm": "/internal/form/queue/clear",
+    "postCreateForm": "/internal/form/post-create",
+    "notificationsManageForm": "/internal/form/notifications/manage",
+    "notificationsSendSingleForm": "/internal/form/notifications/send-single",
+    "cleanupCacheForm": "/internal/form/admin/cleanup-cache",
+    "migrateChallengeProgressForm": "/internal/form/admin/migrate-challenge-progress-compression",
+    "migrateUserCacheForm": "/internal/form/admin/migrate-user-cache-compression",
+    "migrateUserGuessForm": "/internal/form/admin/migrate-user-guess-compression",
+    "migrateNotificationsForm": "/internal/form/admin/migrate-notifications-compression",
+    "statsPlayersForm": "/internal/form/stats/players-count",
+    "peekUserGuessForm": "/internal/form/debug/peek-guess",
+    "commonWordsForm": "/internal/form/stats/common-words"
   },
   "menu": {
     "items": [
       {
-        "label": "Create a new post",
-        "description": "hotandcold",
-        "location": "subreddit",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/post-create"
-      },
-      {
         "label": "[queue] Add to queue",
+        "description": "classic",
         "forUserType": "moderator",
         "location": "subreddit",
         "endpoint": "/internal/menu/add"
       },
       {
         "label": "[queue] Clear queue",
+        "description": "classic",
         "forUserType": "moderator",
         "location": "subreddit",
         "endpoint": "/internal/menu/clear"
       },
       {
         "label": "[queue] Get size",
+        "description": "classic",
         "forUserType": "moderator",
         "location": "subreddit",
         "endpoint": "/internal/menu/size"
       },
       {
+        "label": "[queue] Peek next 3",
+        "description": "classic",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/peek"
+      },
+      {
         "label": "[queue] Get contents via DM",
         "forUserType": "moderator",
         "location": "subreddit",
-        "description": "Look in chat requests if you don't see it",
+        "description": "classic",
         "endpoint": "/internal/menu/dm"
       },
       {
         "label": "[queue] Post next",
         "forUserType": "moderator",
         "location": "subreddit",
+        "description": "classic",
         "endpoint": "/internal/menu/post-next"
       },
       {
         "label": "[migrate] Backfill secret words 1-25",
         "forUserType": "moderator",
         "location": "subreddit",
+        "description": "classic",
         "endpoint": "/internal/menu/migrate-secret-words"
+      },
+      {
+        "label": "[stats] Opted into reminders",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/reminders-count"
+      },
+      {
+        "label": "[stats] Reminders by timezone",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/reminders-by-timezone"
+      },
+      {
+        "label": "[stats] Joined subreddit",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/joined-count"
+      },
+      {
+        "label": "[stats] Export last 30 days",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/export-last-30-days"
+      },
+      {
+        "label": "[notifications] Manage queue",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/notifications/manage"
+      },
+      {
+        "label": "[notifications] Dry run latest",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/notifications/dry-run-latest"
+      },
+      {
+        "label": "[notifications] Send single",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/notifications/send-single"
+      },
+      {
+        "label": "[ops] Sync PostHog user properties",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/analytics/sync-user-props"
+      },
+      {
+        "label": "[ops] Migrate word config gzip",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/word-config/migrate-compression"
+      },
+      {
+        "label": "[ops] Cleanup user cache",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/admin/cleanup-cache"
+      },
+      {
+        "label": "[ops] Toggle cleanup cancel flag",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/admin/toggle-cleanup-cancel"
+      },
+      {
+        "label": "[migrate] Timezones: Offsets → IANA",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/timezones/migrate-to-iana"
+      },
+      {
+        "label": "[ops] Delete legacy reminders keys",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/admin/delete-old-reminders-keys"
+      },
+      {
+        "label": "[ops] Migrate UserGuess compression",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/migrate-user-guess-compression"
+      },
+      {
+        "label": "[ops] Toggle UserGuess migration",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/migrate-user-guess-compression/toggle"
+      },
+      {
+        "label": "[ops] Migrate ChallengeProgress compression",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/migrate-challenge-progress-compression"
+      },
+      {
+        "label": "[ops] Toggle ChallengeProgress migration",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/migrate-challenge-progress-compression/toggle"
+      },
+      {
+        "label": "[ops] Migrate User cache compression",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/migrate-user-cache-compression"
+      },
+      {
+        "label": "[ops] Toggle User cache migration",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/migrate-user-cache-compression/toggle"
+      },
+      {
+        "label": "[ops] Migrate Notifications compression",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/migrate-notifications-compression"
+      },
+      {
+        "label": "[ops] Toggle Notifications migration",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/migrate-notifications-compression/toggle"
+      },
+      {
+        "label": "[ops] Drop IdToUsernameKey",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/admin/drop-id-to-username-key"
+      },
+      {
+        "label": "[stats] Players count for challenge",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/stats/players-count"
+      },
+      {
+        "label": "[stats] Total guesses (All Time)",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/stats/total-guesses"
+      },
+      {
+        "label": "[debug] Peek user guess (raw/decompressed)",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/debug/peek-guess"
+      },
+      {
+        "label": "[stats] Top 25 common words",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/stats/common-words"
+      },
+      {
+        "label": "[stats] Cancel common words job",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "description": "classic",
+        "endpoint": "/internal/menu/stats/common-words/cancel"
       }
     ]
   },
@@ -72,12 +270,62 @@
         "cron": "0 12 * * *",
         "endpoint": "/internal/scheduler/create-new-challenge",
         "data": {}
+      },
+      "create-new-challenge-retry-1": {
+        "cron": "5 12 * * *",
+        "endpoint": "/internal/scheduler/create-new-challenge-retry",
+        "data": {}
+      },
+      "create-new-challenge-retry-2": {
+        "cron": "15 12 * * *",
+        "endpoint": "/internal/scheduler/create-new-challenge-retry",
+        "data": {}
+      },
+      "create-new-challenge-retry-3": {
+        "cron": "30 12 * * *",
+        "endpoint": "/internal/scheduler/create-new-challenge-retry",
+        "data": {}
+      },
+      "update-post-data": {
+        "cron": "*/5 * * * *",
+        "endpoint": "/internal/scheduler/update-post-data",
+        "data": {}
+      },
+      "notifications-backup-sweep": {
+        "cron": "10 * * * *",
+        "endpoint": "/internal/scheduler/notifications-backup-sweep",
+        "data": {}
+      },
+      "notifications-send-group": "/internal/scheduler/notifications-send-group",
+      "users-clean-reminderless-cache": "/internal/scheduler/users-clean-reminderless-cache",
+      "migrate-user-guess-compression": "/internal/scheduler/migrate-user-guess-compression",
+      "migrate-user-cache-compression": "/internal/scheduler/migrate-user-cache-compression",
+      "migrate-challenge-progress-compression": "/internal/scheduler/migrate-challenge-progress-compression",
+      "migrate-notifications-compression": "/internal/scheduler/migrate-notifications-compression",
+      "notifications-enqueue-new-challenge": "/internal/scheduler/notifications-enqueue-new-challenge",
+      "common-words-aggregator": "/internal/scheduler/common-words-aggregator",
+      "common-words-watchdog": {
+        "cron": "*/10 * * * * *",
+        "endpoint": "/internal/scheduler/common-words-watchdog",
+        "data": {}
       }
     }
+  },
+  "triggers": {
+    "onCommentCreate": "/internal/triggers/on-comment-create"
   },
   "permissions": {
     "reddit": {
       "asUser": ["SUBMIT_COMMENT", "SUBSCRIBE_TO_SUBREDDIT"]
+    },
+    "http": {
+      "domains": [
+        "us.i.posthog.com",
+        "us-assets.i.posthog.com",
+        "api.openai.com",
+        "jbbhyxtpholdwrxencjx.supabase.co"
+      ],
+      "enable": true
     }
   },
   "settings": {
@@ -86,10 +334,22 @@
         "label": "Supabase Secret",
         "isSecret": true,
         "type": "string"
+      },
+      "OPEN_AI_API_KEY": {
+        "label": "OpenAI API Key",
+        "isSecret": true,
+        "type": "string"
+      }
+    },
+    "subreddit": {
+      "flairId": {
+        "type": "string",
+        "label": "Game Flair ID",
+        "helpText": "Flair ID for the game tag e.g. d7441bc0-a089-11f0-8b7d-16490fd4785c"
       }
     }
   },
   "dev": {
-    "subreddit": "hotandcold2_app_dev"
+    "subreddit": "HotAndColdDev"
   }
 }

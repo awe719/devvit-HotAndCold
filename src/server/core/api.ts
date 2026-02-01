@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { fn } from '../../shared/fn';
-import { settings, redis } from '@devvit/web/server';
+import { settings } from '@devvit/web/server';
+import { redisCompressed as redis } from './redisCompression';
 
 export * as API from './api.js';
 
@@ -84,7 +85,7 @@ export const getWord = fn(
 );
 
 const THIRTY_DAYS_IN_SECONDS = 30 * 24 * 60 * 60;
-const WordConfigKey = (word: string) => `word_config2:${word}` as const;
+export const WordConfigKey = (word: string) => `word_config2:${word}` as const;
 
 export const getWordConfigCached = fn(
   z.object({
@@ -95,7 +96,6 @@ export const getWordConfigCached = fn(
 
     // Try cache first. On any failure, fall back to fresh fetch.
     try {
-      console.log('Getting word config cached', key);
       const cached = await redis.get(key);
       if (cached) {
         try {
@@ -108,6 +108,8 @@ export const getWordConfigCached = fn(
     } catch {
       // ignore redis read errors and fetch fresh
     }
+
+    console.log('No cache found, fetching fresh...');
 
     // Fetch fresh and attempt to cache
     const fresh = await getWordConfig({ word });
@@ -132,7 +134,6 @@ export const buildLetterCsvForChallenge = fn(
   }),
   async ({ challengeSecretWord, letter }): Promise<string> => {
     const wordConfig = await getWordConfigCached({ word: challengeSecretWord });
-    console.log('word config list', wordConfig.similar_words.length);
     const header = 'word,similarity,rank';
     const lower = letter.toLowerCase();
 

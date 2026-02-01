@@ -4,6 +4,8 @@ import { getNearestPlayersByStartTime, PlayerProgress } from '../core/challengeP
 import { PROGRESS_POLL_TTL_SECONDS } from '../../shared/config';
 import { rankToProgress } from '../../shared/progress';
 import { trpc } from '../trpc';
+import { context } from '@devvit/web/client';
+import { posthog } from '../posthog';
 
 type GroupedPlayers = {
   count: number;
@@ -59,6 +61,10 @@ export function ProgressBar({
     let cancelled = false;
     void (async () => {
       try {
+        if (!context.userId) {
+          if (!cancelled) setMeLoaded(true);
+          return;
+        }
         const me = await trpc.user.me.query();
         if (!cancelled) setMeAvatar(me.snoovatar);
       } catch {
@@ -75,6 +81,11 @@ export function ProgressBar({
   // Poll neighbors every shared TTL seconds
   useEffect(() => {
     let abort = false;
+    if (!context.userId) {
+      // Skip polling entirely when logged out
+      stopPollingRef.current = () => {};
+      return;
+    }
     const fetchOnce = async () => {
       try {
         const res = await getNearestPlayersByStartTime({
@@ -199,7 +210,13 @@ export function ProgressBar({
       </div>
 
       {/* Container for players and groups */}
-      <div ref={containerRef} className="absolute left-0 top-0 h-full w-full">
+      <div
+        ref={containerRef}
+        className="absolute left-0 top-0 h-full w-full"
+        onClick={() => {
+          posthog.capture('Progress Bar Clicked');
+        }}
+      >
         {/* Render individual players */}
         {processed.visiblePlayers.map((item, index) => {
           if (item.isPlayer && !meLoaded) return null; // hide until user info fetched

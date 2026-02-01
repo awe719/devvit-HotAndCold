@@ -5,7 +5,7 @@ import { Challenge } from './challenge';
 import { ChallengeLeaderboard } from './challengeLeaderboard';
 import { Score } from './score';
 import { fn } from '../../shared/fn';
-import { redis } from '@devvit/web/server';
+import { redisCompressed as redis } from './redisCompression';
 import { GameResponseSchema, GuessSchema, ChallengeUserInfoSchema } from '../utils';
 import { User } from './user';
 import { ChallengeProgress } from './challengeProgress';
@@ -248,6 +248,7 @@ export namespace UserGuess {
           word: z.string().trim().toLowerCase(),
           similarity: z.number(),
           rank: z.number(),
+          isHint: z.boolean().optional(),
         })
       ),
     }),
@@ -279,6 +280,7 @@ export namespace UserGuess {
           rawGuess: rawGuess.word,
           similarity: rawGuess.similarity,
           rank: rawGuess.rank,
+          isHintFromClient: rawGuess.isHint === true,
           challengeInfo,
           challengeUserInfo,
         });
@@ -315,6 +317,7 @@ export namespace UserGuess {
     rawGuess: string;
     similarity: number;
     rank: number;
+    isHintFromClient: boolean;
     challengeInfo: Awaited<ReturnType<typeof Challenge.getChallenge>>;
     challengeUserInfo: Awaited<ReturnType<typeof getChallengeUserInfo>>;
   }): Promise<z.infer<typeof GameResponseSchema>> => {
@@ -361,12 +364,14 @@ export namespace UserGuess {
     // const indexOfGuess = wordConfig.similar_words.findIndex((x) => x.word === distance.wordBLemma);
     // const rankOfWord = indexOfGuess === -1 ? -1 : indexOfGuess + 1; // +1 because target is omitted.
 
+    const isHintGuess = params.isHintFromClient === true;
+
     const guessToAdd: z.infer<typeof GuessSchema> = {
       word: rawGuess,
       timestampMs: Date.now(),
       similarity,
       rank: Number.isFinite(rank) ? rank : -1,
-      isHint: false,
+      isHint: isHintGuess,
     };
 
     const newGuesses = z
@@ -390,6 +395,11 @@ export namespace UserGuess {
       username,
       progress,
     });
+
+    // Count hint usage only when the client explicitly marked this guess as a hint
+    if (isHintGuess) {
+      await Challenge.incrementChallengeTotalHints({ challengeNumber });
+    }
 
     const hasSolved = rawGuess === secretWord;
     let score: z.infer<typeof Score.Info> | undefined;

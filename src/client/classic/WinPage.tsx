@@ -6,10 +6,15 @@ import { GradientBorder } from '../shared/gradientBorder';
 import { cn } from '../utils/cn';
 import { trpc } from '../trpc';
 import { Modal } from '../shared/modal';
+import { posthog } from '../posthog';
 // import { context } from '@devvit/web/client';
 import { requireChallengeNumber } from '../requireChallengeNumber';
 import { getPrettyDuration } from '../../shared/prettyDuration';
 import { ScoreBreakdownModal } from './scoreBreakdownModal';
+import { loadHintsForChallenge, type HintWord } from '../core/hints';
+import { context } from '@devvit/web/client';
+import { getBrowserIanaTimeZone } from '../../shared/timezones';
+import { formatCompactNumber } from '../../shared/formatCompactNumber';
 
 type LeaderboardEntry = { member: string; score: number };
 
@@ -38,7 +43,6 @@ type CallToActionType = 'JOIN_SUBREDDIT' | 'REMIND_ME_TO_PLAY' | 'COMMENT' | nul
 const CallToAction = ({
   didWin,
   challengeNumber,
-  stats,
 }: {
   didWin: boolean;
   challengeNumber: number;
@@ -51,7 +55,16 @@ const CallToAction = ({
   const [serverSuffix, setServerSuffix] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!didWin) return;
+    if (!cta) return;
+    posthog.capture('Win Page Call To Action Shown', {
+      didWin,
+      challengeNumber,
+      cta,
+    });
+  }, [cta]);
+
+  useEffect(() => {
+    // Always fetch the CTA for this challenge so users can comment even before winning
     void (async () => {
       try {
         const next = await trpc.cta.getCallToAction.query({ challengeNumber });
@@ -60,17 +73,49 @@ const CallToAction = ({
         setCta(null);
       }
     })();
-  }, [didWin, challengeNumber]);
+  }, [challengeNumber]);
+
+  // Temporary backfill shim: for ~1 week, whenever a user reaches the win page
+  // and already has reminders enabled, send their timezone so we can populate
+  // missing data for users who opted in before we collected timezones.
+  // Use a reliable tRPC check instead of CTA to determine opt-in state.
+  // TODO: Remove this after the backfill window ends.
+  useEffect(() => {
+    void (async () => {
+      try {
+        if (!context.userId) return;
+        const isOptedIn = await trpc.cta.isOptedIntoReminders.query();
+        if (!isOptedIn) return;
+        const timezone = getBrowserIanaTimeZone();
+        await trpc.cta.setReminder.mutate({ timezone });
+      } catch (err) {
+        console.error('Error backfilling timezone', err);
+        // ignore
+      }
+    })();
+  }, []);
 
   if (cta === null) return null;
 
   const doAction = async () => {
     setIsLoading(true);
+
+    posthog.capture('Win Page Call To Action Clicked', {
+      cta,
+    });
+
     try {
       if (cta === 'JOIN_SUBREDDIT') {
+        posthog.setPersonProperties({
+          joined_subreddit: true,
+        });
         await trpc.cta.joinSubreddit.mutate({});
       } else if (cta === 'REMIND_ME_TO_PLAY') {
-        await trpc.cta.setReminder.mutate({});
+        posthog.setPersonProperties({
+          opted_into_reminders: true,
+        });
+        const timezone = getBrowserIanaTimeZone();
+        await trpc.cta.setReminder.mutate({ timezone });
       } else if (cta === 'COMMENT') {
         // Preload the server-computed suffix before opening modal
         try {
@@ -90,6 +135,11 @@ const CallToAction = ({
   };
 
   const submitComment = async () => {
+    posthog.capture('Win Page Comment Submit Clicked', {
+      challengeNumber,
+      comment,
+    });
+
     if (!comment.trim()) return;
     setIsLoading(true);
     try {
@@ -106,10 +156,10 @@ const CallToAction = ({
 
   const label =
     cta === 'JOIN_SUBREDDIT'
-      ? 'Join r/hotandcold'
+      ? `Join r/${context.subredditName}`
       : cta === 'REMIND_ME_TO_PLAY'
         ? 'Remind me to play every day'
-        : 'Share your results in the thread';
+        : 'Share your journey in the thread';
 
   return (
     <div className="text-sm">
@@ -134,7 +184,7 @@ const CallToAction = ({
             className="mb-3 h-28 w-full resize-none rounded-md border border-gray-300 bg-white p-2 text-sm text-black outline-none focus:ring-2 focus:ring-blue-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
             value={comment}
             onInput={(e) => setComment((e.target as HTMLTextAreaElement).value)}
-            placeholder={`I scored ${stats.score ?? '--'} in ${stats.timeToSolve ?? '--'} and ranked #${stats.rank ?? '--'}!`}
+            placeholder={`Share your word journey or details about your strategy!`}
           />
           {serverSuffix && (
             <p className="-mt-2 mb-3 text-[10px] leading-4 text-gray-500 dark:text-gray-400">
@@ -145,7 +195,12 @@ const CallToAction = ({
             <button
               type="button"
               className="rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-              onClick={() => setIsCommentOpen(false)}
+              onClick={() => {
+                posthog.capture('Win Page Comment Cancel Clicked', {
+                  challengeNumber,
+                });
+                setIsCommentOpen(false);
+              }}
             >
               Cancel
             </button>
@@ -169,6 +224,8 @@ export function WinPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [userRank, setUserRank] = useState<number | null>(null);
   const [isScoreOpen, setIsScoreOpen] = useState(false);
+  const [hints, setHints] = useState<HintWord[] | null>(null);
+  const [isHintsLoading, setIsHintsLoading] = useState(false);
 
   const challengeNumber = useMemo(() => requireChallengeNumber(), []);
 
@@ -202,6 +259,27 @@ export function WinPage() {
     })();
   }, [challengeNumber]);
 
+  useEffect(() => {
+    // Load closest words (hints) once per challenge
+    void (async () => {
+      setIsHintsLoading(true);
+      try {
+        const words = await loadHintsForChallenge(challengeNumber);
+        // Sort by ascending rank (0 is closest); fallback to similarity desc
+        const sorted = words
+          .slice(0)
+          .sort(
+            (a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || b.similarity - a.similarity
+          );
+        setHints(sorted);
+      } catch {
+        setHints([]);
+      } finally {
+        setIsHintsLoading(false);
+      }
+    })();
+  }, [challengeNumber]);
+
   if (!challengeUserInfo || !challengeInfo) {
     // optimistic skeleton
     return (
@@ -224,16 +302,40 @@ export function WinPage() {
   };
 
   const playerRank = userRank ?? 0;
-  const totalPlayers = challengeInfo.totalPlayers || 1;
-  const percentageOutperformed = calculatePercentageOutperformed(playerRank, totalPlayers);
+  const totalPlayers = challengeInfo?.totalPlayers ?? 0;
+  const percentageOutperformed = calculatePercentageOutperformed(
+    playerRank,
+    Math.max(totalPlayers, 1)
+  );
+  const totalSolves = challengeInfo?.totalSolves ?? 0;
+  const totalGuesses = challengeInfo?.totalGuesses ?? 0;
+  const totalHints = challengeInfo?.totalHints ?? 0;
+  const totalGiveUps = challengeInfo?.totalGiveUps ?? 0;
+  const averageGuessesRaw = totalPlayers > 0 ? totalGuesses / totalPlayers : 0;
+  const averageGuessesRounded = Math.round(averageGuessesRaw * 10) / 10;
+
+  const tabList = [
+    { name: 'Me' },
+    { name: 'Global' },
+    { name: 'Closest' },
+    { name: 'Guesses' },
+    { name: 'Standings' },
+  ];
 
   return (
-    <div className={cn('flex flex-1 flex-col gap-6 px-4')}>
+    <div className={cn('flex flex-1 flex-col gap-6 md:px-4')}>
       <div className="mx-auto">
         <Tablist
           activeIndex={activeIndex}
-          onChange={setActiveIndex}
-          items={[{ name: 'My Stats' }, { name: 'Challenge Stats' }, { name: 'Leaderboard' }]}
+          onChange={(index) => {
+            const tabClicked = tabList[index]!.name;
+            posthog.capture('Win Page Tab Clicked', {
+              index,
+              tabClicked,
+            });
+            setActiveIndex(index);
+          }}
+          items={tabList}
         />
       </div>
 
@@ -256,7 +358,10 @@ export function WinPage() {
                         <button
                           type="button"
                           className="cursor-pointer text-inherit underline"
-                          onClick={() => setIsScoreOpen(true)}
+                          onClick={() => {
+                            posthog.capture('Win Page Score Breakdown Clicked');
+                            setIsScoreOpen(true);
+                          }}
                         >
                           breakdown
                         </button>
@@ -299,26 +404,125 @@ export function WinPage() {
         {activeIndex === 1 && (
           <div className="flex flex-col gap-6">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-              <StatCard title="Total Players" value={challengeInfo?.totalPlayers ?? 0} />
-              <StatCard title="Total Solves" value={challengeInfo?.totalSolves ?? 0} />
-              <StatCard title="Total Guesses" value={challengeInfo?.totalGuesses ?? 0} />
-              <StatCard title="Total Hints" value={challengeInfo?.totalHints ?? 0} />
-              <StatCard title="Give Ups" value={challengeInfo?.totalGiveUps ?? 0} />
+              <StatCard title="Total Players" value={formatCompactNumber(totalPlayers)} />
+              <StatCard title="Total Solves" value={formatCompactNumber(totalSolves)} />
+              <StatCard title="Total Guesses" value={formatCompactNumber(totalGuesses)} />
+              <StatCard title="Total Hints" value={formatCompactNumber(totalHints)} />
+              <StatCard title="Give Ups" value={formatCompactNumber(totalGiveUps)} />
               <StatCard
                 title="Solve Rate"
                 value={`${Math.round(((challengeInfo?.totalSolves ?? 0) / (challengeInfo?.totalPlayers ?? 1)) * 100)}%`}
               />
               <StatCard
                 title="Average Guesses"
-                value={Math.round(
-                  (challengeInfo?.totalGuesses ?? 0) / (challengeInfo?.totalPlayers ?? 1)
-                )}
+                value={formatCompactNumber(averageGuessesRounded)}
               />
             </div>
           </div>
         )}
 
         {activeIndex === 2 && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+                Closest words
+              </h2>
+              {hints && hints.length > 0 && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {hints.length} words
+                </span>
+              )}
+            </div>
+            <div className="overflow-y-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 max-h-[50vh]">
+              {isHintsLoading ? (
+                <div className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading…</div>
+              ) : !hints || hints.length === 0 ? (
+                <div className="p-4 text-sm text-gray-700 dark:text-gray-300">
+                  No hints available.
+                </div>
+              ) : (
+                hints.map((h, index) => (
+                  <div
+                    key={`${h.word}-${index}`}
+                    className={cn(
+                      'flex items-center px-4 py-1 transition-colors duration-150',
+                      index % 2 === 0
+                        ? 'bg-gray-50 dark:bg-gray-800/50'
+                        : 'bg-gray-100 dark:bg-gray-900/50'
+                    )}
+                  >
+                    <div className="flex flex-1 items-center gap-3">
+                      <span className="min-w-[2rem] font-mono text-sm text-gray-600 dark:text-gray-400">
+                        #{h.rank ?? index}
+                      </span>
+                      <span className="truncate font-medium text-gray-900 dark:text-white">
+                        {h.word}
+                      </span>
+                    </div>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      {(h.similarity * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeIndex === 3 && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+                Your guesses
+              </h2>
+              {challengeUserInfo.guesses?.length ? (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {challengeUserInfo.guesses.length} total
+                </span>
+              ) : null}
+            </div>
+            <div className="overflow-y-auto max-h-[50vh] rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+              {!challengeUserInfo.guesses || challengeUserInfo.guesses.length === 0 ? (
+                <div className="p-4 text-sm text-gray-700 dark:text-gray-300">No guesses yet.</div>
+              ) : (
+                [...challengeUserInfo.guesses]
+                  .sort((a: any, b: any) => Number(b.timestampMs ?? 0) - Number(a.timestampMs ?? 0))
+                  .map((g: any, index: number) => (
+                    <div
+                      key={`${g.word}-${g.timestampMs ?? index}`}
+                      className={cn(
+                        'flex items-center px-4 py-1 transition-colors duration-150',
+                        index % 2 === 0
+                          ? 'bg-gray-50 dark:bg-gray-800/50'
+                          : 'bg-gray-100 dark:bg-gray-900/50'
+                      )}
+                    >
+                      <div className="flex flex-1 items-center gap-3">
+                        <span className="min-w-[2.25rem] font-mono text-sm text-gray-600 dark:text-gray-400">
+                          #{typeof g.rank === 'number' && g.rank >= 0 ? g.rank : '—'}
+                        </span>
+                        <span className="truncate font-medium text-gray-900 dark:text-white">
+                          {g.word}
+                        </span>
+                        {g.isHint ? (
+                          <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                            Hint
+                          </span>
+                        ) : null}
+                      </div>
+                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                        {typeof g.similarity === 'number'
+                          ? (g.similarity * 100).toFixed(1) + '%'
+                          : '—'}
+                      </span>
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeIndex === 4 && (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1 text-center">
               {userRank && (
@@ -329,18 +533,10 @@ export function WinPage() {
             </div>
 
             {leaderboard?.length ? (
-              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
-                {leaderboard.map((entry, index, entries) => {
+              <div className="overflow-y-auto max-h-[50vh] rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                {leaderboard.map((entry, index) => {
                   const isCurrentUser = entry.member === challengeUserInfo.username;
-                  let rank = 1;
-                  if (index > 0) {
-                    const prevScore = entries[index - 1]?.score ?? entry.score;
-                    if (entry.score === prevScore) {
-                      rank = Math.max(1, entries.findIndex((e) => e.score === entry.score) + 1);
-                    } else {
-                      rank = index + 1;
-                    }
-                  }
+                  const rank = index + 1;
                   const isTopThree = rank <= 3;
                   return (
                     <div

@@ -1,3 +1,4 @@
+/* eslint-disable no-empty */
 import { signal, batch } from '@preact/signals';
 import { makeGuess, getLetterPreloadOrder, preloadLetterMaps } from './guess';
 import { createLocalStorageSignal } from '../utils/localStorageSignal';
@@ -33,6 +34,7 @@ export type GuessSubmission = {
   similarity: number;
   rank: number; // -1 when unknown
   atMs: number;
+  isHint?: boolean;
 };
 
 export type GuessEngine = {
@@ -47,6 +49,7 @@ export type GuessEngine = {
 
   // actions
   submit: (raw: string) => Promise<ClientGuessResult>;
+  submitHint: (word: string) => Promise<ClientGuessResult>;
   clear: () => void;
 };
 
@@ -65,6 +68,7 @@ const isValidWord = (word: string): boolean => /^[a-zA-Z][a-zA-Z'-]*$/.test(word
 // Placeholder: wire to tRPC once server exposes a mutation
 import { trpc } from '../trpc';
 import { markSolvedForCurrentChallenge } from '../classic/state/navigation';
+import { posthog } from '../posthog';
 // import { rankToProgress } from '../../shared/progress';
 
 const submitBatchToServer = async (
@@ -167,6 +171,9 @@ export function createGuessEngine(params: {
     const localHistorySnapshot: GuessHistoryItem[] = history.value.slice();
     try {
       const server = await trpc.game.get.query({ challengeNumber });
+      if (!server.challengeUserInfo) {
+        return;
+      }
       const serverWords = server.challengeUserInfo.guesses.map((g: any) => g.word);
       const serverHistory: GuessHistoryItem[] = server.challengeUserInfo.guesses.map((g: any) => {
         const s = Number(g.similarity);
@@ -404,6 +411,15 @@ export function createGuessEngine(params: {
             const solvedAt = Number(serverState.solvedAtMs) || now;
             solvedAtMs.value = solvedAt;
             markSolvedForCurrentChallenge(solvedAt);
+            try {
+              posthog.capture('Solved Word', {
+                challengeNumber,
+                word: corrected,
+                rank: Number.isFinite(data.rank) ? (data.rank as number) : null,
+                totalGuesses: history.value.length,
+                solvedAtMs: solvedAt,
+              });
+            } catch {}
           } else {
             // Fallback: mark locally; server will reconcile on next fetch
             solvedAtMs.value = now;
@@ -414,6 +430,15 @@ export function createGuessEngine(params: {
               rank: Number.isFinite(data.rank) ? (data.rank as number) : -1,
               timestamp: now,
             });
+            try {
+              posthog.capture('Solved Word', {
+                challengeNumber,
+                word: corrected,
+                rank: Number.isFinite(data.rank) ? (data.rank as number) : null,
+                totalGuesses: history.value.length,
+                solvedAtMs: now,
+              });
+            } catch {}
           }
         } catch {
           // Network/server error – fallback to optimistic local win and background ensure
@@ -425,6 +450,15 @@ export function createGuessEngine(params: {
             rank: Number.isFinite(data.rank) ? (data.rank as number) : -1,
             timestamp: now,
           });
+          try {
+            posthog.capture('Solved Word', {
+              challengeNumber,
+              word: corrected,
+              rank: Number.isFinite(data.rank) ? (data.rank as number) : null,
+              totalGuesses: history.value.length,
+              solvedAtMs: now,
+            });
+          } catch {}
         }
       }
       return res;
@@ -434,6 +468,97 @@ export function createGuessEngine(params: {
         ok: false,
         code: 'UNAVAILABLE',
         message: 'Dictionary is unavailable right now. Please try again.',
+      };
+      lastResult.value = res;
+      return res;
+    } finally {
+      isSubmitting.value = false;
+    }
+  };
+
+  // Submit a specific word as a hint-triggered guess (client-driven isHint=true)
+  const submitHint = async (raw: string): Promise<ClientGuessResult> => {
+    const now = Date.now();
+    const word = normalizeWord(raw);
+    if (hasGuessed(word)) {
+      const alreadyGuessed = history.value.find((h) => h.word === word);
+      const res: Extract<ClientGuessResult, { ok: false }> = {
+        ok: false,
+        code: 'DUPLICATE',
+        word,
+        message: `You already guessed “${word}”. (#${alreadyGuessed?.rank})`,
+      };
+      lastResult.value = res;
+      return res;
+    }
+
+    // Look up similarity/rank for the hint word using the same path as free guesses
+    try {
+      isSubmitting.value = true;
+      const data = await makeGuess(word);
+      if (!data) {
+        const res: Extract<ClientGuessResult, { ok: false }> = {
+          ok: false,
+          code: 'NOT_IN_DICTIONARY',
+          word,
+          message: `I don't recognize “${word}”. Try another word.`,
+        };
+        lastResult.value = res;
+        return res;
+      }
+
+      const corrected = typeof data.word === 'string' && data.word.length > 0 ? data.word : word;
+      if (hasGuessed(corrected)) {
+        const alreadyGuessed = history.value.find((h) => h.word === corrected);
+        const res: Extract<ClientGuessResult, { ok: false }> = {
+          ok: false,
+          code: 'DUPLICATE',
+          word: corrected,
+          message: `You already guessed “${corrected}”. (#${alreadyGuessed?.rank})`,
+        };
+        lastResult.value = res;
+        return res;
+      }
+
+      batch(() => {
+        history.value = [
+          ...history.value,
+          {
+            word: corrected,
+            similarity: data.similarity,
+            rank: Number.isFinite(data.rank) ? (data.rank as number) : -1,
+            timestamp: now,
+          },
+        ];
+      });
+
+      // Fire-and-forget to server, marking isHint=true
+      void (async () => {
+        try {
+          const serverState = await submitBatchToServer(challengeNumber, [
+            {
+              word: corrected,
+              similarity: data.similarity,
+              rank: Number.isFinite(data.rank) ? (data.rank as number) : -1,
+              atMs: now,
+              isHint: true,
+            },
+          ]);
+          if (serverState && serverState.solvedAtMs) {
+            const solvedAt = Number(serverState.solvedAtMs) || Date.now();
+            solvedAtMs.value = solvedAt;
+            markSolvedForCurrentChallenge(solvedAt);
+          }
+        } catch {
+          // ignore
+        }
+      })();
+
+      const res: Extract<ClientGuessResult, { ok: true }> = {
+        ok: true,
+        word: corrected,
+        similarity: data.similarity,
+        rank: Number.isFinite(data.rank) ? data.rank : null,
       };
       lastResult.value = res;
       return res;
@@ -464,6 +589,7 @@ export function createGuessEngine(params: {
     solvedAtMs,
     hasGuessed,
     submit,
+    submitHint,
     clear,
   };
 }
